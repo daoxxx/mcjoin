@@ -58,11 +58,12 @@ usage
 ```shell
     $ mcjoin -h
     
-    Usage: mcjoin [dhjqsv] [-c COUNT] [-i IFNAME] [-p PORT] [-r SEC] [-t TTL]
+    Usage: mcjoin [dhjqsv] [-w SEC.USEC] [-c COUNT] [-i IFNAME] [-p PORT] [-r SEC] [-t TTL]
     	      [GROUP0 .. GROUPN | GROUP+NUM]
     
     Options:
       -c COUNT     Exit after COUNT number of received and/or sent packets
+      -w SEC.USEC  Stop after SEC.USEC seconds
       -d           Debug output
       -h           This help text
       -i IFNAME    Interface to use for multicast groups, default eth0

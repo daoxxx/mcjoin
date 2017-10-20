@@ -32,6 +32,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 #define BUFSZ           100
@@ -90,6 +91,7 @@ size_t count = 0;
 int port = DEFAULT_PORT;
 unsigned char ttl = 1;
 char *ident = PACKAGE_NAME;
+struct itimerspec wtimeout = {0};
 
 size_t group_num = 0;
 struct gr groups[MAX_NUM_GROUPS];
@@ -470,13 +472,41 @@ static void exit_loop(int signo)
 	running = 0;
 }
 
+static void handle_timeout(int signo)
+{
+	DEBUG("TIMEOUT! (signo: %d)", signo);
+	exit_loop(signo);
+}
+
+static int set_timeout(int signo, struct itimerspec *it) {
+	struct sigevent wte = {
+		.sigev_notify = SIGEV_SIGNAL,
+		.sigev_signo = signo,
+	};
+	timer_t wt_timer;
+
+	if(timer_create(CLOCK_MONOTONIC, &wte, &wt_timer) == 0) {
+		if(timer_settime(wt_timer, 0, it, NULL) == 0) {
+			DEBUG("Timeout set: %zu.%zu s", it->it_value.tv_sec, it->it_value.tv_nsec);
+		} else {
+			ERROR("Failed setting work timeout timer.\n");
+			return -1;
+		}
+	} else {
+		ERROR("Failed creating work timeout timer.\n");
+		return -1;
+	}
+	return 0;
+}
+
 static int usage(int code)
 {
-	printf("\nUsage: %s [dhjqsv] [-c COUNT] [-i IFACE] [-p PORT] [-r SEC] [-t TTL]\n"
+	printf("\nUsage: %s [dhjqsv] [-w SEC.USEC] [-c COUNT] [-i IFACE] [-p PORT] [-r SEC] [-t TTL]\n"
 	       "              [GROUP0 .. GROUPN | GROUP+NUM]\n"
 	       "\n"
 	       "Options:\n"
 	       "  -c COUNT     Stop after sending/receiving COUNT number of packets\n"
+	       "  -w SEC.USEC  Stop after SEC.USEC seconds\n"
 	       "  -d           Debug output\n"
 	       "  -h           This help text\n"
 	       "  -i IFACE     Interface to use for sending/receiving multicast, default: %s\n"
@@ -516,6 +546,12 @@ int main(int argc, char *argv[])
 		.sa_handler = exit_loop,
 	};
 	extern int optind;
+	double wt_arg;
+	int wt_signo = SIGRTMIN;
+	struct sigaction wt_sa = {
+		.sa_flags = SA_RESTART,
+		.sa_handler = handle_timeout,
+	};
 
 	/* Default interface
 	 * XXX - Should be the first, after lo, in the list at /proc/net/dev, or
@@ -526,8 +562,14 @@ int main(int argc, char *argv[])
 		memset(&groups[i], 0, sizeof(groups[0]));
 
 	ident = progname(argv[0]);
-	while ((c = getopt(argc, argv, "c:di:jp:qr:st:vh")) != EOF) {
+	while ((c = getopt(argc, argv, "w:c:di:jp:qr:st:vh")) != EOF) {
 		switch (c) {
+		case 'w':
+			wt_arg = atof(optarg);
+			wtimeout.it_value.tv_sec = (size_t)wt_arg;
+			wtimeout.it_value.tv_nsec = (long)((wt_arg - (size_t)wt_arg) * 1000000000);
+			break;
+
 		case 'c':
 			count = (size_t)atoi(optarg);
 			break;
@@ -643,6 +685,11 @@ int main(int argc, char *argv[])
 	sigaction(SIGINT,  &sa, NULL);
 	sigaction(SIGHUP,  &sa, NULL);
 	sigaction(SIGTERM, &sa, NULL);
+
+	if(wtimeout.it_value.tv_sec != 0 || wtimeout.it_value.tv_nsec != 0) {
+		sigaction(wt_signo, &wt_sa, NULL);
+		set_timeout(wt_signo, &wtimeout);
+	}
 
 	return loop();
 }
